@@ -1,4 +1,6 @@
+#[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
 use reqwest::{self};
+
 use std::error::Error;
 use std::fmt;
 
