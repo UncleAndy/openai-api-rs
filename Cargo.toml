@@ -16,7 +16,7 @@ features = ["charset", "http2", "json", "multipart", "socks", "stream", "__rustl
 
 [dependencies.tokio]
 version = "1"
-features = ["full"]
+features = ["sync","macros","io-util","rt","time"]
 
 [dependencies.serde]
 version = "1"
