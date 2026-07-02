@@ -86,10 +86,15 @@ pub struct OpenAIClientBuilder {
 #[derive(Debug)]
 pub struct OpenAIClient {
     api_endpoint: String,
+    #[allow(dead_code)]
     api_key: Option<String>,
+    #[allow(dead_code)]
     organization: Option<String>,
+    #[allow(dead_code)]
     proxy: Option<String>,
+    #[allow(dead_code)]
     timeout: Option<u64>,
+    #[allow(dead_code)]
     headers: Option<HeaderMap>,
 }
 
@@ -235,7 +240,7 @@ impl OpenAIClient {
             .body(raw_data);
 
         let response = request.send()
-            .map_err(|err| APIError::from(err.to_string()))?;
+            .map_err(|err| APIError::from(err))?;
 
         self.handle_response(response).await
     }
@@ -260,7 +265,7 @@ impl OpenAIClient {
             .await;
 
         let response = request.send()
-            .map_err(|err| APIError::from(err.to_string()))?;
+            .map_err(|err| APIError::from(err))?;
 
         self.handle_response(response).await
     }
@@ -279,9 +284,9 @@ impl OpenAIClient {
             .await;
 
         let response = request.send()
-            .map_err(|err| APIError::from(err.to_string()))?;
+            .map_err(|err| APIError::from(err))?;
 
-        Ok(response.bytes().unwrap())
+        Ok(response.bytes()?)
     }
 
     #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
@@ -1067,16 +1072,21 @@ impl OpenAIClient {
             message: format!("Failed to serialize request: {}", err),
         })?;
 
-        if let Some(obj) = payload.as_object_mut() {
+        if let Some(obj) = payload.clone().as_object_mut() {
             obj.insert("stream".into(), Value::Bool(true));
         }
 
         let request = self.build_request(Method::POST, "responses").await;
-        let request = request.body(payload.as_str().unwrap());
-        let response = request.send().unwrap();
+
+        let body = serde_json::to_string(&payload).map_err(|err| APIError::CustomError {
+            message: format!("Failed to serialize payload to JSON: {}", err),
+        })?;
+
+        let request = request.body(body);
+        let response = request.send()?;
 
         if response.status().is_success() {
-            let bytes = response.bytes().unwrap();
+            let bytes = response.bytes()?;
             let byte_stream = futures_util::stream::once(async move {
                 Ok::<Bytes, anyhow::Error>(bytes)
             });
@@ -1171,6 +1181,7 @@ impl OpenAIClient {
         self.delete(&format!("models/{model_id}")).await
     }
 
+    #[allow(dead_code)]
     fn build_url_with_preserved_query(&self, path: &str) -> Result<String, url::ParseError> {
         let (base, query_opt) = match self.api_endpoint.split_once('?') {
             Some((b, q)) => (b.trim_end_matches('/'), Some(q)),
@@ -1214,6 +1225,7 @@ impl OpenAIClient {
         url
     }
 
+    #[allow(dead_code)]
     fn is_beta(path: &str) -> bool {
         path.starts_with("assistants") || path.starts_with("threads")
     }

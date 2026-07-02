@@ -26,3 +26,10 @@ impl From<anyhow::Error> for APIError {
         APIError::ReqwestError(err)
     }
 }
+
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl From<golem_wasi_http::Error> for APIError {
+    fn from(err: golem_wasi_http::Error) -> APIError {
+        APIError::ReqwestError(err.into())
+    }
+}
