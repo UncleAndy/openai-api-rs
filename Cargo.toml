@@ -37,6 +37,4 @@ tokio-tungstenite = { version = "0.29.0", features = ["connect", "rustls-pki-typ
 golem-wasi-http = { version = "0", features = ["multipart"] }
 url = "2.5"
 [dependencies]
-anyhow = "1.0.103"
-[dependencies]
-wstd = "0.6.7"
+anyhow = "1.0"

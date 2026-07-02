@@ -62,7 +62,7 @@ use golem_wasi_http::{Client, Method, Response, RequestBuilder};
 use golem_wasi_http::header::{HeaderMap, HeaderName, HeaderValue};
 
 use serde::Serialize;
-use serde_json::{json, to_value, Value};
+use serde_json::{to_value, Value};
 use url::Url;
 
 use std::error::Error;
@@ -386,14 +386,14 @@ impl OpenAIClient {
         if status.is_success() {
             let headers = response.headers().clone();
             let body = response.bytes().unwrap();
-            let parsed: T = serde_json::from_slice(body.as_ref()).map_err(|e| {
+            let parsed: T = serde_json::from_slice(body.as_ref()).map_err(|_| {
                 APIError::CustomError {
-                    message: format!("Failed to parse JSON from response {:?}", response),
+                    message: format!("Failed to parse JSON from response {:?}", body),
                 }
             })?;
 
             Ok(CallResponse {
-                headers,
+                headers: headers.clone(),
                 inner: parsed,
             })
         } else {
@@ -614,7 +614,11 @@ impl OpenAIClient {
         req: AudioSpeechRequest,
     ) -> Result<CallResponse<AudioSpeechResponse>, APIError> {
         let request = self.build_request(Method::POST, "audio/speech").await;
-        let request = request.body(json!(req).as_str().unwrap());
+
+        let body_json = serde_json::to_string(&req).map_err(|err| APIError::CustomError {
+            message: format!("Failed to serialize request: {}", err),
+        })?;
+        let request = request.body(body_json);
         let response = request.send().unwrap();
 
         let headers = response.headers().clone();

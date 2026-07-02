@@ -18,7 +18,7 @@ pub enum ResponseStreamResponse {
     Done,
 }
 
-pub struct ResponseStream<S: Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin> {
+pub struct ResponseStream<S: Stream<Item = Result<bytes::Bytes, anyhow::Error>> + Unpin> {
     pub response: S,
     pub buffer: String,
     pub first_chunk: bool,
@@ -26,7 +26,7 @@ pub struct ResponseStream<S: Stream<Item = Result<bytes::Bytes, reqwest::Error>>
 
 impl<S> ResponseStream<S>
 where
-    S: Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<bytes::Bytes, anyhow::Error>> + Unpin,
 {
     fn find_event_delimiter(buffer: &str) -> Option<(usize, usize)> {
         let carriage_idx = buffer.find("\r\n\r\n");
@@ -99,7 +99,7 @@ where
     }
 }
 
-impl<S: Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin> Stream for ResponseStream<S> {
+impl<S: Stream<Item = Result<bytes::Bytes, anyhow::Error>> + Unpin> Stream for ResponseStream<S> {
     type Item = ResponseStreamResponse;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
