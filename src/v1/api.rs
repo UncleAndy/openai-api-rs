@@ -8,9 +8,6 @@ use crate::v1::audio::{
 };
 use crate::v1::batch::{BatchResponse, CreateBatchRequest, ListBatchResponse};
 use crate::v1::chat_completion::chat_completion::{ChatCompletionRequest, ChatCompletionResponse};
-use crate::v1::chat_completion::chat_completion_stream::{
-    ChatCompletionStream, ChatCompletionStreamRequest, ChatCompletionStreamResponse,
-};
 use crate::v1::common;
 use crate::v1::completion::{CompletionRequest, CompletionResponse};
 use crate::v1::edit::{EditRequest, EditResponse};
@@ -61,7 +58,8 @@ use reqwest::{Client, Method, Response};
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 use std::result::Result;
 use golem_wasi_http::multipart::{Form, Part};
-use golem_wasi_http::{Client, Method, Response, RequestBuilder, ClientBuilder, Request};
+use golem_wasi_http::{Client, Method, Response, RequestBuilder};
+use golem_wasi_http::header::{HeaderMap, HeaderName, HeaderValue};
 
 use serde::Serialize;
 use serde_json::{json, to_value, Value};
@@ -71,10 +69,7 @@ use std::error::Error;
 use std::fs::{create_dir_all, File};
 use std::io::Read;
 use std::io::Write;
-use std::ops::Deref;
 use std::path::Path;
-use wstd::http::Method;
-use wstd::http::request::Builder;
 
 const API_URL_V1: &str = "https://api.openai.com/v1";
 
@@ -137,7 +132,7 @@ impl OpenAIClientBuilder {
         self
     }
 
-    pub fn build(self) -> std::result::Result<OpenAIClient, Box<dyn Error>> {
+    pub fn build(self) -> Result<OpenAIClient, Box<dyn Error>> {
         let api_endpoint = self.api_endpoint.unwrap_or_else(|| {
             std::env::var("OPENAI_API_BASE").unwrap_or_else(|_| API_URL_V1.to_owned())
         });
@@ -385,20 +380,15 @@ impl OpenAIClient {
     #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
     async fn handle_response<T: serde::de::DeserializeOwned>(
         &self,
-        response: Response<Body>,
+        response: Response,
     ) -> Result<CallResponse<T>, APIError> {
         let status = response.status();
         if status.is_success() {
             let headers = response.headers().clone();
-            let mut body = response.into_body();
-            let raw_response = body.contents().await.map_err(|e| {
+            let body = response.bytes().unwrap();
+            let parsed: T = serde_json::from_slice(body.as_ref()).map_err(|e| {
                 APIError::CustomError {
-                    message: format!("Failed to read response body: {e}"),
-                }
-            })?;
-            let parsed: T = serde_json::from_slice(raw_response).map_err(|e| {
-                APIError::CustomError {
-                    message: format!("Failed to parse JSON: {e} / response {raw_response:?}"),
+                    message: format!("Failed to parse JSON from response {:?}", response),
                 }
             })?;
 
@@ -490,6 +480,7 @@ impl OpenAIClient {
         self.post("chat/completions", &req).await
     }
 
+    #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
     pub async fn chat_completion_stream(
         &self,
         req: ChatCompletionStreamRequest,
@@ -524,6 +515,42 @@ impl OpenAIClient {
         }
     }
 
+    #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
+    pub async fn chat_completion_stream(
+        &self,
+        req: ChatCompletionStreamRequest,
+    ) -> Result<impl Stream<Item = ChatCompletionStreamResponse>, APIError> {
+        let mut payload = to_value(&req).map_err(|err| APIError::CustomError {
+            message: format!("Failed to serialize request: {}", err),
+        })?;
+
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("stream".into(), Value::Bool(true));
+        }
+
+        let request = self.build_request(Method::POST, "chat/completions").await;
+        let request = request.json(&payload);
+        let response = request.send().await?;
+
+        if response.status().is_success() {
+            Ok(ChatCompletionStream {
+                response: Box::pin(response.bytes_stream()),
+                buffer: String::new(),
+                first_chunk: true,
+            })
+        } else {
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| String::from("Unknown error"));
+
+            Err(APIError::CustomError {
+                message: error_text,
+            })
+        }
+    }
+
+    #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
     pub async fn audio_transcription(
         &self,
         req: AudioTranscriptionRequest,
@@ -587,10 +614,11 @@ impl OpenAIClient {
         req: AudioSpeechRequest,
     ) -> Result<CallResponse<AudioSpeechResponse>, APIError> {
         let request = self.build_request(Method::POST, "audio/speech").await;
-        let request = request.json(&req);
-        let response = request.send().await?;
+        let request = request.body(json!(req).as_str().unwrap());
+        let response = request.send().unwrap();
+
         let headers = response.headers().clone();
-        let bytes = response.bytes().await?;
+        let bytes = response.bytes().unwrap();
         let path = Path::new(req.output.as_str());
         if let Some(parent) = path.parent() {
             match create_dir_all(parent) {
@@ -991,6 +1019,7 @@ impl OpenAIClient {
         self.post("responses", &req).await
     }
 
+    #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
     pub async fn create_response_stream(
         &self,
         req: CreateResponseStreamRequest,
@@ -1017,6 +1046,45 @@ impl OpenAIClient {
             let error_text = response
                 .text()
                 .await
+                .unwrap_or_else(|_| String::from("Unknown error"));
+
+            Err(APIError::CustomError {
+                message: error_text,
+            })
+        }
+    }
+
+    #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+    pub async fn create_response_stream(
+        &self,
+        req: CreateResponseStreamRequest,
+    ) -> Result<impl Stream<Item = ResponseStreamResponse>, APIError> {
+        let mut payload = to_value(&req).map_err(|err| APIError::CustomError {
+            message: format!("Failed to serialize request: {}", err),
+        })?;
+
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("stream".into(), Value::Bool(true));
+        }
+
+        let request = self.build_request(Method::POST, "responses").await;
+        let request = request.body(payload.as_str().unwrap());
+        let response = request.send().unwrap();
+
+        if response.status().is_success() {
+            let bytes = response.bytes().unwrap();
+            let byte_stream = futures_util::stream::once(async move {
+                Ok::<Bytes, anyhow::Error>(bytes)
+            });
+
+            Ok(ResponseStream {
+                response: Box::pin(byte_stream),
+                buffer: String::new(),
+                first_chunk: true,
+            })
+        } else {
+            let error_text = response
+                .text()
                 .unwrap_or_else(|_| String::from("Unknown error"));
 
             Err(APIError::CustomError {
@@ -1150,7 +1218,7 @@ impl OpenAIClient {
     where
         T: Serialize,
     {
-        let json = match serde_json::to_value(req) {
+        let json = match to_value(req) {
             Ok(json) => json,
             Err(e) => {
                 return Err(APIError::CustomError {
@@ -1214,7 +1282,7 @@ impl OpenAIClient {
     where
         T: Serialize,
     {
-        let json = match serde_json::to_value(req) {
+        let json = match to_value(req) {
             Ok(json) => json,
             Err(e) => {
                 return Err(APIError::CustomError {
