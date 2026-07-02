@@ -2,6 +2,13 @@ use crate::v1::assistant::{
     AssistantFileObject, AssistantFileRequest, AssistantObject, AssistantRequest, ListAssistant,
     ListAssistantFile,
 };
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
+use crate::v1::audio::{
+    AudioSpeechRequest, AudioSpeechResponse, AudioTranscriptionRequest,
+    AudioTranslationRequest, AudioTranslationResponse,
+};
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 use crate::v1::audio::{
     AudioSpeechRequest, AudioSpeechResponse, AudioTranscriptionRequest, AudioTranscriptionResponse,
     AudioTranslationRequest, AudioTranslationResponse,
@@ -537,20 +544,28 @@ impl OpenAIClient {
             obj.insert("stream".into(), Value::Bool(true));
         }
 
+        let body = serde_json::to_string(&payload).map_err(|err| APIError::CustomError {
+            message: format!("Failed to serialize payload to JSON: {}", err),
+        })?;
+
         let request = self.build_request(Method::POST, "chat/completions").await;
-        let request = request.json(&payload);
-        let response = request.send().await?;
+        let request = request.body(body);
+        let response = request.send()?;
 
         if response.status().is_success() {
+            let bytes = response.bytes()?;
+            let byte_stream = futures_util::stream::once(async move {
+                Ok::<Bytes, anyhow::Error>(bytes)
+            });
+
             Ok(ChatCompletionStream {
-                response: Box::pin(response.bytes_stream()),
+                response: Box::pin(byte_stream),
                 buffer: String::new(),
                 first_chunk: true,
             })
         } else {
             let error_text = response
                 .text()
-                .await
                 .unwrap_or_else(|_| String::from("Unknown error"));
 
             Err(APIError::CustomError {
