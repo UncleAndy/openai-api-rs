@@ -6,7 +6,7 @@ use std::fmt;
 
 #[derive(Debug)]
 pub enum APIError {
-    ReqwestError(reqwest::Error),
+    ReqwestError(anyhow::Error),
     CustomError { message: String },
 }
 
@@ -21,8 +21,8 @@ impl fmt::Display for APIError {
 
 impl Error for APIError {}
 
-impl From<reqwest::Error> for APIError {
-    fn from(err: reqwest::Error) -> APIError {
+impl From<anyhow::Error> for APIError {
+    fn from(err: anyhow::Error) -> APIError {
         APIError::ReqwestError(err)
     }
 }
