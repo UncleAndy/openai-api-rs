@@ -62,6 +62,8 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::multipart::{Form, Part};
 #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
 use reqwest::{Client, Method, Response};
+#[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
+use tokio_tungstenite::tungstenite::client;
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 use std::result::Result;
@@ -218,11 +220,49 @@ impl OpenAIClient {
     }
     #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
     async fn build_request(&self, method: Method, path: &str) -> RequestBuilder {
-        // TODO: Implement this method for WASI
+        let url = self
+            .build_url_with_preserved_query(path)
+            .unwrap_or_else(|_| format!("{}/{}", self.api_endpoint, path));
 
-        let uri = Url::parse(path).unwrap();
+        let mut client = Client::new().request(method, url);
 
-        Client::new().request(method, uri)
+        client = if let Some(timeout) = self.timeout {
+            client.timeout(std::time::Duration::from_secs(timeout))
+        } else {
+            client
+        };
+
+        // WARNING! Proxy - на уровне хоста
+
+        client = if let Some(api_key) = &self.api_key {
+            client.header("Authorization", format!("Bearer {api_key}"))
+        } else {
+            client
+        };
+
+        client = if let Some(organization) = &self.organization {
+            client.header("openai-organization", organization)
+        } else {
+            client
+        };
+
+        client = if let Some(headers) = &self.headers {
+            let mut client_intern = client;
+            for (key, value) in headers {
+                client_intern = client_intern.header(key, value);
+            };
+            client_intern
+        } else {
+            client
+        };
+
+        client = if Self::is_beta(path) {
+            client.header("OpenAI-Beta", "assistants=v2")
+        } else {
+            client
+        };
+
+        client
     }
 
     #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
@@ -319,7 +359,7 @@ impl OpenAIClient {
             .build_request(Method::DELETE, path)
             .await;
 
-        let response = request.send().unwrap();
+        let response = request.send()?;
 
         self.handle_response(response).await
     }
@@ -344,7 +384,7 @@ impl OpenAIClient {
     ) -> Result<CallResponse<T>, APIError> {
         let request = self.build_request(Method::POST, path).await;
         let request = request.multipart(form);
-        let response = request.send().unwrap();
+        let response = request.send()?;
         self.handle_response(response).await
     }
 
@@ -360,8 +400,8 @@ impl OpenAIClient {
     async fn post_form_raw(&self, path: &str, form: Form) -> Result<Bytes, APIError> {
         let request = self.build_request(Method::POST, path).await;
         let request = request.multipart(form);
-        let response = request.send().unwrap();
-        Ok(response.bytes().unwrap())
+        let response = request.send()?;
+        Ok(response.bytes()?)
     }
 
     #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
@@ -401,7 +441,7 @@ impl OpenAIClient {
         let status = response.status();
         if status.is_success() {
             let headers = response.headers().clone();
-            let body = response.bytes().unwrap();
+            let body = response.bytes()?;
             let parsed: T = serde_json::from_slice(body.as_ref()).map_err(|_| {
                 APIError::CustomError {
                     message: format!("Failed to parse JSON from response {:?}", body),
@@ -555,7 +595,7 @@ impl OpenAIClient {
         if response.status().is_success() {
             let bytes = response.bytes()?;
             let byte_stream = futures_util::stream::once(async move {
-                Ok::<Bytes, anyhow::Error>(bytes)
+                Ok::<Bytes, Error>(bytes)
             });
 
             Ok(ChatCompletionStream {
@@ -644,13 +684,13 @@ impl OpenAIClient {
         })?;
         let request = request.body(body_json);
         #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-        let response = request.send().unwrap();
+        let response = request.send()?;
         #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
         let response = request.send().await?;
 
         let headers = response.headers().clone();
         #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-        let bytes = response.bytes().unwrap();
+        let bytes = response.bytes()?;
         #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
         let bytes = response.bytes().await?;
         let path = Path::new(req.output.as_str());
@@ -1113,7 +1153,7 @@ impl OpenAIClient {
         if response.status().is_success() {
             let bytes = response.bytes()?;
             let byte_stream = futures_util::stream::once(async move {
-                Ok::<Bytes, anyhow::Error>(bytes)
+                Ok::<Bytes, Error>(bytes)
             });
 
             Ok(ResponseStream {
