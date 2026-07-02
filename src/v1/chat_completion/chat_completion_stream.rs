@@ -112,7 +112,7 @@ pub enum ChatCompletionStreamResponse {
     Done,
 }
 
-pub struct ChatCompletionStream<S: Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin> {
+pub struct ChatCompletionStream<S: Stream<Item = Result<bytes::Bytes, anyhow::Error>> + Unpin> {
     pub response: S,
     pub buffer: String,
     pub first_chunk: bool,
@@ -120,7 +120,7 @@ pub struct ChatCompletionStream<S: Stream<Item = Result<bytes::Bytes, reqwest::E
 
 impl<S> ChatCompletionStream<S>
 where
-    S: Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<bytes::Bytes, anyhow::Error>> + Unpin,
 {
     fn find_event_delimiter(buffer: &str) -> Option<(usize, usize)> {
         let carriage_idx = buffer.find("\r\n\r\n");
@@ -216,7 +216,7 @@ where
     }
 }
 
-impl<S: Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin> Stream
+impl<S: Stream<Item = Result<bytes::Bytes, anyhow::Error>> + Unpin> Stream
     for ChatCompletionStream<S>
 {
     type Item = ChatCompletionStreamResponse;
