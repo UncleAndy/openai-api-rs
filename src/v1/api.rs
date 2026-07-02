@@ -1068,7 +1068,7 @@ impl OpenAIClient {
         &self,
         req: CreateResponseStreamRequest,
     ) -> Result<impl Stream<Item = ResponseStreamResponse>, APIError> {
-        let mut payload = to_value(&req).map_err(|err| APIError::CustomError {
+        let payload = to_value(&req).map_err(|err| APIError::CustomError {
             message: format!("Failed to serialize request: {}", err),
         })?;
 
