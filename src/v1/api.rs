@@ -44,6 +44,7 @@ use crate::v1::run::{
     RunStepObject,
 };
 use crate::v1::thread::{CreateThreadRequest, ModifyThreadRequest, ThreadObject};
+use crate::v1::chat_completion::chat_completion_stream::{ChatCompletionStream, ChatCompletionStreamRequest, ChatCompletionStreamResponse};
 
 use bytes::Bytes;
 use futures_util::Stream;
@@ -57,15 +58,18 @@ use reqwest::{Client, Method, Response};
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 use std::result::Result;
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 use golem_wasi_http::multipart::{Form, Part};
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 use golem_wasi_http::{Client, Method, Response, RequestBuilder};
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 use golem_wasi_http::header::{HeaderMap, HeaderName, HeaderValue};
 
 use serde::Serialize;
 use serde_json::{to_value, Value};
 use url::Url;
 
-use std::error::Error;
+use anyhow::Error;
 use std::fs::{create_dir_all, File};
 use std::io::Read;
 use std::io::Write;
@@ -137,7 +141,7 @@ impl OpenAIClientBuilder {
         self
     }
 
-    pub fn build(self) -> Result<OpenAIClient, Box<dyn Error>> {
+    pub fn build(self) -> Result<OpenAIClient, Error> {
         let api_endpoint = self.api_endpoint.unwrap_or_else(|| {
             std::env::var("OPENAI_API_BASE").unwrap_or_else(|_| API_URL_V1.to_owned())
         });
@@ -520,7 +524,7 @@ impl OpenAIClient {
         }
     }
 
-    #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
+    #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
     pub async fn chat_completion_stream(
         &self,
         req: ChatCompletionStreamRequest,
@@ -624,10 +628,16 @@ impl OpenAIClient {
             message: format!("Failed to serialize request: {}", err),
         })?;
         let request = request.body(body_json);
+        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
         let response = request.send().unwrap();
+        #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
+        let response = request.send().await?;
 
         let headers = response.headers().clone();
+        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
         let bytes = response.bytes().unwrap();
+        #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
+        let bytes = response.bytes().await?;
         let path = Path::new(req.output.as_str());
         if let Some(parent) = path.parent() {
             match create_dir_all(parent) {
