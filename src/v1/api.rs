@@ -62,8 +62,6 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::multipart::{Form, Part};
 #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
 use reqwest::{Client, Method, Response};
-#[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
-use tokio_tungstenite::tungstenite::client;
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 use std::result::Result;
